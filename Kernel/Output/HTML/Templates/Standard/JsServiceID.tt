@@ -1,0 +1,566 @@
+[% WRAPPER JSOnDocumentComplete %]
+<script type="text/javascript">//<![CDATA[
+/*
+ * @TODO BUGS CONHECIDOS
+ * nas telas de criação de chamado, ao remover o cliente, não está atualizando página.
+ */
+
+// Metodo para verificar se valor não é igual ao informado
+$.validator.addMethod("Validate_NotEquals",function (Value, Element) {
+    if(Value == $(Element).attr('notEquals') ){
+        Core.Form.ErrorTooltips.InitTooltip($(Element), '[% Translate("This field is required.") | html %]');
+#       Comentamos a linha abaixo, pois, no Chrome, ela estava impedindo o acessar outros campos em determinadas situações Ticket#5126192        
+#        $(Element).focus();
+    }
+    return ( Value != $(Element).attr('notEquals') );
+}, "");
+$.validator.addClassRules("Validate_NotEquals", {
+    Validate_NotEquals: true
+});
+
+
+// Armazena todos os serviços
+var AllServices = new Array();
+// Uma variavel para armazenar o ultimo valor de cada nivel
+var lastLevelValue = new Object();
+// Uma variável para armazenar o nível mais profundo da árvore de serviços
+var ServicesDepth = 0;
+
+// Esta função cria um dropdown, utilizando os valores da variável
+// AllServices. Os options serão exibidos de acordo com a opção sTopService,
+// que determina qual é o serviço pai. No caso do primeiro nível de serviços,
+// deve-se passar a opção sTopService: '_root_'
+function createDropdown(options){
+    //Pega os parametros
+    var ins;
+    var options     = options || {};
+    var sTopService = options.sTopService;
+    var sId         = options.sId;
+    var sInsert     = options.sInsert;
+    var sInitial    = options.sInitial || true;
+    var sSelected   = options.sSelected || '';
+    var sEffect     = options.sEffect || false;
+    var sDisabled   = options.sDisabled;
+
+    // cria a caixa de seleção
+    var sel = $("<select /\>", {id: sId,name: sId});
+    
+    // Verifica se tem que encapsular, se sim, encapsula
+    if(sTopService!='_root_'){
+        var div   = $("<div /\>",{id: 'div_mss_'+sId});
+        var label = $("<label\>&nbsp;</label\>",{'for': sId,id: 'lab_mss_'+sId}).css({background:'none'});
+
+        // Verificar também se a tela é de agent ou customer, pois o tipo de 
+        // exibição é diferente em cada caso
+        if (Core.Config.Get('Action').indexOf('Customer')==0){
+            // Customer
+            label.appendTo(div);
+            sel.appendTo(div);
+            ins=div;
+        } else {
+            // Agent
+            ins=sel;
+        }
+
+    } else {
+        ins=sel;    
+    };
+    ins.insertAfter(sInsert);
+    
+    // Quebra de linha
+    if(sEffect == true){
+        ins.css("display", "block").hide();
+    } else {
+        ins.css("display", "block");
+    };
+    
+
+    // Pesquisa pelos itens que devem ser criados neste nível
+    var RootServices = $.grep(AllServices, function(e){ return e.sTopService == sTopService; });
+    // Para cada item, cria uma opção
+    for (var srv in RootServices) {
+        if (RootServices.hasOwnProperty(srv)) {
+            $("<option /\>", {value: RootServices[srv].sKey, text: RootServices[srv].sName}).appendTo(sel);
+        };
+    };
+    
+    // seleciona valor
+    if (sSelected!=''){
+        sel.val(sSelected);    
+    };
+    
+    // Exibe o novo Dropdown
+    if(sEffect == true){
+        ins.fadeIn('slow');
+    };
+
+    // Controla as alterações de valores desta caixa
+    sel.change(CategoryOrServiceSelected);
+    //Dispara a primeira solicitação "change", para caregar sub serviços
+    if (sInitial==false){
+        sel.change();
+    };
+    
+    // Verifica se a seleção de um item deste nível é obrigatória.
+    if (sDisabled){
+        sel.attr("notEquals",RootServices[0].sKey);
+        sel.addClass("Validate_NotEquals");
+    } else if (sTopService='_root_' && $('#ServiceID').hasClass('Validate_Required')){
+        // Se for a caixa dos serviços da raíz e o campo serviço for obrigatório, tem que selecionar algo aqui..
+        sel.attr("notEquals",'-');
+        sel.addClass("Validate_NotEquals");
+    }
+
+};
+
+function CategoryOrServiceSelected () {
+
+    Core.Form.ErrorTooltips.RemoveTooltip($(this));
+
+    // Armazena o valor da chave da caixa selecionada
+    var sKey = $(this).val();
+
+    // obtem os atributos desta chave na variável de categorias
+    var myService = $.grep(AllServices, function(e){ return e.sKey == sKey; });
+
+    // apaga todos os níveis abaixo deste e recria posteriormente se necessário
+    for (var s = (myService[0].sLevel+2); s <= ServicesDepth+1; s++ ){
+        $('#ServiceID'+s).remove();
+        // remove possíveis divs
+        $('#lab_mss_ServiceID'+s).remove();
+        $('#div_mss_ServiceID'+s).remove();
+    };
+
+    // se é pai, verifica se opção está desabilitada. 
+    // Se estiver desabilitada, limpa service ID
+    if(myService[0].sDisabled){
+        // Verifica se pode selecionar o serviço pai
+        if(myService[0].sTopService!='_root_'){
+            var topService = $.grep(AllServices, function(e){ return e.sKey == myService[0].sTopService; });
+            if(topService[0].sDisabled){
+                // Não pode selecionar, limpa ServiceID
+                $('#ServiceID').val('').addClass("Error").valid();
+
+            } else {
+                // Pode selecionar pai
+                $('#ServiceID').removeClass('Error');
+                $('#ServiceID').val(topService[0].sId);
+            }
+
+        } else {
+            // Se o nível selecionado foi o primeiro, limpa o ServiceID
+            $('#ServiceID').removeClass('Error');
+            $('#ServiceID').val('');
+        }
+
+    } else {
+        // Se nao estiver, seleciona
+        $('#ServiceID').removeClass('Error');
+        $('#ServiceID').val(myService[0].sId).change();
+    }
+    
+    setField();
+
+    // função cria nova caixa de seleção filha, se a atual é pai
+    if( myService[0].sIsTop  ){
+    
+            // Se for nível pai, e estiver desabilitado, por padrão, coloca classe erro
+            if(myService[0].sDisabled){
+                $('#ServiceID').addClass("Error").valid();
+                $('#ServiceID').val('');
+            }
+
+            // cria o dropdown filho
+            createDropdown({
+                sTopService: sKey,
+                sId:         'ServiceID'+(myService[0].sLevel+2),
+                sInsert:     '#ServiceID'+(myService[0].sLevel+1),
+                sEffect:     true,
+                sDisabled:   myService[0].sDisabled,
+            });
+    }
+    
+};
+
+function readServiceID(){
+    AllServices = [];
+
+    //var level, diz qual é o nivel atual. Cada ocorrencia dupla de &nbsp; é um nível
+    var level=0, levelAnterior=0;
+    var chaveAnterior;
+    var x=0;
+
+    // Armazena todos os serviços
+    $("#ServiceID option").each(function()
+    {
+        var sId   = $(this).val();
+        var sName = $(this).text();
+        var sTopService;
+
+        // Verifica qual é a profundidade atual
+        level = (sName.match(/[\s][\s]/g) || []).length;
+
+        // Armazena o nome deste serviço na variável de níveis
+        lastLevelValue[level] = sName = sName.trim();
+        
+        //Verifica e armazena o nível de profundidade da árvore de serviços
+        if(level>ServicesDepth){
+            ServicesDepth=level;
+        }
+
+        //cria indice para este serviço
+        var key = lastLevelValue[0];
+        for (var i = 1; i <= level; i++) { 
+            key += '::'+lastLevelValue[i];
+        }
+
+        //Verifica quem é o serviço pai
+        if(level>0){
+            //Armazena a informação no option anterior de que ele é pai
+            sTopService = lastLevelValue[0];
+            for (i = 1; i < level; i++) { 
+                sTopService += '::'+lastLevelValue[i];
+            };
+
+        } else {
+            // Se profundidade for zero, então este serviço está na raiz
+            sTopService='_root_';
+
+        };
+
+        //Verifica se o option anterior é pai deste
+        if(level>levelAnterior){
+            //Armazena a informação no option anterior de que ele é pai deste serviço atual
+            AllServices[x-1].sIsTop=1;
+
+            // Se mudamos de nível, vamos criar antes de mais nada, uma opção vazia
+            x++;
+            AllServices.push (
+                { 
+                    'sId'         : sTopService+'::-',
+                    'sName'       : '-',
+                    'sKey'        : sTopService+'::-',
+                    'sLevel'      : level,
+                    'sIsTop'      : 0,
+                    'sDisabled'   : true,
+                    'sTopService' : sTopService,
+                    
+                });
+        };
+
+        // Armazena este serviço e suas propriedades
+<!--        alert ('sID '+sId+' sName '+sName+' sKey '+key+' sTopService '+sTopService);-->
+        AllServices.push (
+            { 
+                'sId'         : sId, 
+                'sName'       : sName, 
+                'sKey'        : key, 
+                'sLevel'      : level,
+                'sIsTop'      : 0,
+                'sDisabled'   : $(this).is(':disabled'),
+                'sTopService' : sTopService,
+                
+            });
+        levelAnterior=level;
+        chaveAnterior=key;
+        x++;
+    });
+};
+
+
+// Atribui o nome do serviço selecionado ao Field, se definido
+function setField(){
+//Essa função só terá conteúdo se a opção SetField deste addon for definida
+[% RenderBlockStart("SetField") %]
+    var myService = $.grep(AllServices, function(e){ return e.sId == $('#ServiceID').val(); });
+    if(myService[0].sKey != '-'){
+        $('[% Data.Field | html %]').val(myService[0].sKey);
+    } else {
+        $('[% Data.Field | html %]').val('');
+    }
+
+[% RenderBlockEnd("SetField") %]        
+}
+
+jQuery(function($) {
+        /*
+         * Overview
+         * Verifies if the Service combo exists
+         * Hide the Service Field with javascript hide function
+         * Remove tree view
+         * Read Service ID values e organize it
+         * If there is a preselected service, store this ID (servId)
+         *
+         */
+	$("select[id^='Service']").change(function(){
+		var idFinal =	$(this).val();
+		for(var i=0; i < AllServices.length; i++){
+			if(AllServices[i].sId === idFinal){
+				$("#Sservice").val(AllServices[i].sKey);
+			}
+		}	
+	});
+	// Verifica se o elemento existe
+    // Verifica se o elemento existe
+    if($('#ServiceID').length){
+        // Esconde o campo Serviço
+        $("#ServiceID").hide();
+        $("#ServiceID_Search").parent().parent().hide();
+    
+   
+    	var newField = " <div class='Clear'></div><label for='Sservice' class=''>Busca Serviço:</label><div class='Field'> <input id='Sservice' type='text' placeholder='faça sua busca aqui' name='Sservice' value='' class='W75pc'>  </div>";
+	if (Core.Config.Get('Action').indexOf('Customer')==0){
+            // Customer
+[% RenderBlockStart("SearchBoxInCustomer") %]
+		 $("label[for='ServiceID']").before(newField);
+[% RenderBlockEnd("SearchBoxInCustomer") %]
+	}else{
+[% RenderBlockStart("SearchBoxInAgent") %]
+		$("label[for='ServiceID']").prev().before(newField);
+[% RenderBlockEnd("SearchBoxInAgent") %]
+	}
+        // Por ora, remove o tree selection para evitar confusões
+        $('#ServiceID').next('a.ShowTreeSelection').hide();
+        // Popula a variavel de opções a partir da select existente
+        readServiceID();
+
+        // VERIFICA SERVIÇO SELECIONADO
+        var servId=$('#ServiceID').val();
+        
+        //Enquanto não chegar na raiz, cria serviços pai
+        var myServiceSelected = $.grep(AllServices, function(e){ return e.sId == servId; });
+        var servKey = myServiceSelected[0].sKey;
+        var parentService;
+        while(parentService!='_root_'){
+            var myService = $.grep(AllServices, function(e){ return e.sKey == servKey; });
+            // Cria Drop Down
+            createDropdown({
+                sTopService: myService[0].sTopService,
+                sId:         'ServiceID'+(myService[0].sLevel+1),
+                sInsert:     '#ServiceID',
+                sSelected:   myService[0].sKey,
+                sDisabled:   myService[0].sDisabled,
+            });
+
+            var myNextService = $.grep(AllServices, function(e){ return e.sKey == myService[0].sTopService; });
+            if(myNextService[0]){
+                servKey=myNextService[0].sKey;
+                parentService=myService[0].sTopService;        
+            } else {
+                parentService='_root_';
+            };
+        };
+		var collectService=[];
+		collectService = populaServico();
+
+		var level=0, levelAnterior=0;
+		var chaveAnterior;
+    	var x=0;
+	    // Armazena todos os serviços
+		$("#ServiceID option").each(function()
+	    {
+			//Recupera do Select o ID e o Nome
+	        var sId   = $(this).val();
+	        var sName = $(this).text();
+
+	
+    	    // Verifica qual é a profundidade atual
+        	 level = (sName.match(/[\s][\s]/g) || []).length;
+	        // Armazena o nome deste serviço na variável de níveis
+    	    lastLevelValue[level] = sName = sName.trim();
+        	//Verifica e armazena o nível de profundidade da árvore de serviços
+	        if(level>ServicesDepth){
+    	        ServicesDepth=level;
+        	}
+
+	        //cria indice para este serviço
+    	    var key = lastLevelValue[0];
+        	for (var i = 1; i <= level; i++) {
+	            key += '::'+lastLevelValue[i];
+	
+    	    }
+
+			//	collectService.push (
+			//        { 
+			//            'value'         : key,
+			//            'id'      	    : sId,
+			//            'level'         : level, 
+			//        });
+        
+			 $( "#Sservice" ).bind( "keydown", function( event ) {
+	        	if ( event.keyCode === $.ui.keyCode.TAB && $( this ).autocomplete( "instance" ).menu.active ) {
+		      		event.preventDefault();
+	    	    }
+	
+	     	}).autocomplete({
+				select: function( event, ui ) {
+					if(ui.item.id !== "-"){
+						if(level != 0){
+	     					$('#ServiceID1').remove();
+							// remove possíveis divs
+					        $('#lab_mss_ServiceID1').remove();
+					        $('#div_mss_ServiceID1').remove();
+						}
+						for (var s = (myService[0].sLevel+2); s <= ServicesDepth+1; s++ ){
+					        $('#ServiceID'+s).remove();
+				        	// remove possíveis divs
+					        $('#lab_mss_ServiceID'+s).remove();
+					        $('#div_mss_ServiceID'+s).remove();
+						};
+	
+						$("#ServiceID").val(ui.item.id);
+						recriarBox();
+						setField();
+
+						 $("#ServiceID").trigger("change");
+					}
+               
+	 			},source: collectService
+        	});
+  
+  		});
+
+
+        // Monitora alterações do campo serviço:
+        $( document ).ajaxComplete(function( event, xhr, settings ) {
+[% RenderBlockStart("SetFieldAjax") %]
+             // Compatibilidade com Ticket Forms OTRS AG
+             if ($('[% Data.Field | html %]').val()=='__SERVICE__') {
+                 setField();
+             }
+[% RenderBlockEnd("SetFieldAjax") %]
+
+            // 
+            $('#ServiceID').removeClass('Error');
+
+            if($('#ServiceID').val()==''){
+                // Apaga todas as caixas
+                for (var s = 1; s <= ServicesDepth+1; s++ ){
+                    $('#ServiceID'+s).remove();
+                    $('#lab_mss_ServiceID'+s).remove();
+                    $('#div_mss_ServiceID'+s).remove();
+
+                };
+                
+                // Relê as opções e recria caixa
+                readServiceID();
+                
+                // Cria primeiro Drop Down    
+                createDropdown({
+                    sTopService: '_root_',
+                    sId:         'ServiceID1',
+                    sInsert:     '#ServiceID',
+                    sInitial:    true,
+                });
+            };
+       
+
+			collectService = populaServico();
+		 	$( "#Sservice" ).bind( "keydown", function( event ) {
+        		if ( event.keyCode === $.ui.keyCode.TAB && $( this ).autocomplete( "instance" ).menu.active ) {
+	      		event.preventDefault();
+	 	       }
+	     	}).autocomplete({
+				select: function( event, ui ) {
+					if(ui.item.id !== "-"){
+						if(ui.item.level != 0){
+     						$('#ServiceID1').remove();
+							// remove possíveis divs
+					        $('#lab_mss_ServiceID1').remove();
+					        $('#div_mss_ServiceID1').remove();
+						}
+						for (var s = (myService[0].sLevel+2); s <= ServicesDepth+1; s++ ){
+				    	    $('#ServiceID'+s).remove();
+			        		// remove possíveis divs
+					        $('#lab_mss_ServiceID'+s).remove();
+					        $('#div_mss_ServiceID'+s).remove();
+						};
+
+						$("#ServiceID").val(ui.item.id);
+						
+						recriarBox();
+						setField();
+						 $("#ServiceID").trigger("change");
+					}
+               
+		 		},source: collectService
+        	});
+//-----------
+		});
+    };
+});
+
+function recriarBox(){
+var servId=$('#ServiceID').val();
+        
+        //Enquanto não chegar na raiz, cria serviços pai
+        var myServiceSelected = $.grep(AllServices, function(e){ return e.sId == servId; });
+        var servKey = myServiceSelected[0].sKey;
+        var parentService;
+        while(parentService!='_root_'){
+            var myService = $.grep(AllServices, function(e){ return e.sKey == servKey; });
+            // Cria Drop Down
+            createDropdown({
+                sTopService: myService[0].sTopService,
+                sId:         'ServiceID'+(myService[0].sLevel+1),
+                sInsert:     '#ServiceID',
+                sSelected:   myService[0].sKey,
+                sDisabled:   myService[0].sDisabled,
+            });
+
+            var myNextService = $.grep(AllServices, function(e){ return e.sKey == myService[0].sTopService; });
+            if(myNextService[0]){
+                servKey=myNextService[0].sKey;
+                parentService=myService[0].sTopService;        
+            } else {
+                parentService='_root_';
+            };
+        };
+}	
+
+function populaServico(){
+	var level=0, levelAnterior=0;
+    var chaveAnterior;
+    var x=0;
+    var collectService=[];
+    // Armazena todos os serviços
+    $("#ServiceID option").each(function()
+    {
+	//Recupera do Select o ID e o Nome
+        var sId   = $(this).val();
+        var sName = $(this).text();
+		var category = "";
+        // Verifica qual é a profundidade atual
+         level = (sName.match(/[\s][\s]/g) || []).length;
+        // Armazena o nome deste serviço na variável de níveis
+        lastLevelValue[level] = sName = sName.trim();
+        //Verifica e armazena o nível de profundidade da árvore de serviços
+        if(level>ServicesDepth){
+            ServicesDepth=level;
+        }
+		if(level === 1){
+		category = lastLevelValue[0];
+		}
+        //cria indice para este serviço
+        var key = lastLevelValue[0];
+        for (var i = 1; i <= level; i++) {
+            key += '::'+lastLevelValue[i];
+	
+        }
+
+		collectService.push (
+        { 
+            'value'         : key,
+            'id'      	    : sId,
+            'level'         : level, 
+			'category'     : category,
+        });
+ 
+
+	});
+
+	return collectService;
+}	
+//]]></script>
+[% END %]
+
