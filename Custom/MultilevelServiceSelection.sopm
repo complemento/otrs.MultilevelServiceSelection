@@ -4,8 +4,8 @@
     <Version>6.0.0</Version>
     <Framework>6.0.x</Framework>
     <Framework>6.1.x</Framework>
-    <Vendor>Ligero [Community]</Vendor>
-    <URL>http://www.complemento.net.br/</URL>
+    <Vendor>LigeroSmart</Vendor>
+    <URL>http://ligerosmart.com/</URL>
     <ChangeLog Date="2017-01-16 11:50:00" Version="5.0.5">Add search box for ((otrs)) Community Edition. Also, create parameters to show it on Customer or Agent interfaces.</ChangeLog>
     <License>GNU GENERAL PUBLIC LICENSE Version 2, June 1991</License>
     <Description Lang="en">Complemento Multi Level Service Selection.</Description>
